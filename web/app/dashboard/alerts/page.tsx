@@ -8,7 +8,7 @@ export default function AlertsPage() {
   return (
     <div className="mx-auto max-w-3xl">
       <h1 className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>
-        Fire Alerts
+        Alerts
       </h1>
 
       {loading ? (
@@ -27,9 +27,13 @@ export default function AlertsPage() {
                 <div className="flex items-center gap-2">
                   <span
                     className="rounded-full px-2 py-0.5 text-xs font-semibold"
-                    style={{ color: "var(--status-critical)", backgroundColor: "rgba(208,59,59,0.12)" }}
+                    style={
+                      alert.type === "FIRE"
+                        ? { color: "var(--status-critical)", backgroundColor: "rgba(208,59,59,0.12)" }
+                        : { color: "var(--status-warning)", backgroundColor: "rgba(250,178,25,0.16)" }
+                    }
                   >
-                    FIRE
+                    {alert.type === "FIRE" ? "FIRE" : "SMOKE WARNING"}
                   </span>
                   <span className="font-semibold" style={{ color: "var(--text-primary)" }}>
                     {alert.coachId}

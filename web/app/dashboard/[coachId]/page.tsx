@@ -45,6 +45,7 @@ export default function CoachDetailPage({ params }: { params: Promise<{ coachId:
   }
 
   const isFire = coach.status?.state === "FIRE";
+  const isSmokeWarning = coach.status?.state === "SMOKE_WARNING";
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -72,16 +73,33 @@ export default function CoachDetailPage({ params }: { params: Promise<{ coachId:
           Fire condition detected on this coach. Dispatch response per protocol.
         </div>
       )}
+      {isSmokeWarning && (
+        <div
+          className="mt-4 rounded-lg px-4 py-3 text-sm font-medium"
+          style={{ backgroundColor: "rgba(250,178,25,0.16)", color: "var(--status-warning)" }}
+        >
+          Elevated smoke detected on this coach. Monitor closely — temperature and flame
+          readings are not yet in the fire range.
+        </div>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <SensorCard label="Smoke (MQ-2)" value={coach.sensors?.smoke ?? "—"} flagged={isFire} />
+        <SensorCard
+          label="Smoke (MQ-2)"
+          value={coach.sensors?.smoke ?? "—"}
+          flagged={isFire ? "critical" : isSmokeWarning ? "warning" : false}
+        />
         <SensorCard
           label="Temperature"
           value={coach.sensors?.temperature ?? "—"}
           unit="°C"
-          flagged={isFire}
+          flagged={isFire ? "critical" : false}
         />
-        <SensorCard label="Flame Sensor" value={coach.sensors?.flame ? "Detected" : "Clear"} flagged={coach.sensors?.flame} />
+        <SensorCard
+          label="Flame Sensor"
+          value={coach.sensors?.flame ? "Detected" : "Clear"}
+          flagged={coach.sensors?.flame ? "critical" : false}
+        />
       </div>
 
       <p className="mt-6 text-xs" style={{ color: "var(--text-muted)" }}>

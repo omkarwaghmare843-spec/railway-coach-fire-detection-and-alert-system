@@ -7,10 +7,18 @@
  *   - DS18B20 Temp Sensor -> GPIO 23 (OneWire, digital)
  *   - 16x2 I2C LCD        -> SDA GPIO 21, SCL GPIO 22
  *
- * Logic:
+ * Logic (three-tier decision):
  *   FIRE DETECTED if:
  *     flameDetected == true
  *     OR (smokeValue > SMOKE_THRESHOLD AND tempValue > TEMP_THRESHOLD)
+ *   SMOKE WARNING if (and FIRE not already true):
+ *     smokeValue > SMOKE_WARNING_THRESHOLD
+ *   otherwise NORMAL.
+ *
+ * A smoke-only reading (no elevated temp, no flame) does NOT escalate to full
+ * FIRE — it raises a separate SMOKE WARNING tier instead, so dust/steam alone
+ * doesn't trip a critical alert, but the condition is still surfaced to
+ * railway authorities rather than silently ignored.
  *
  * Data is pushed to Firebase Realtime Database over WiFi using the REST API.
  */
@@ -33,7 +41,7 @@ const char* WIFI_PASSWORD = "Admin@123";
 const char* FIREBASE_HOST = "https://railway-safty-default-rtdb.firebaseio.com";
 // Firebase RTDB secret / database auth token (legacy secret) used as ?auth= param.
 // Generate from Firebase Console > Project Settings > Service Accounts > Database Secrets.
-const char* FIREBASE_AUTH = "YOUR_FIREBASE_DATABASE_SECRET";
+const char* FIREBASE_AUTH = "xtDRwr3Szl76Fc2O6MoWtWuBU96ejymCUEHQbPvW";
 
 // Unique identifier for this coach/device — must match a node under /coaches in the DB.
 const char* COACH_ID = "coach_01";
@@ -46,7 +54,8 @@ const char* COACH_ID = "coach_01";
 #define I2C_SCL        22
 
 // ---------------- Thresholds ----------------
-const int   SMOKE_THRESHOLD = 1800;   // ADC 0-4095, tune to MQ-2 sensitivity/env
+const int   SMOKE_WARNING_THRESHOLD = 2200; // ADC 0-4095; smoke-only -> SMOKE WARNING tier
+const int   SMOKE_THRESHOLD = 3200;   // ADC 0-4095, tune to MQ-2 sensitivity/env
 const float TEMP_THRESHOLD  = 55.0;   // degrees Celsius
 const int   FLAME_THRESHOLD = 2000;   // lower ADC reading usually means flame detected
                                        // (flame sensors are typically active-low / inverted)
@@ -60,7 +69,8 @@ LiquidCrystal_I2C lcd(0x27, 16, 2); // common address 0x27; try 0x3F if blank
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature ds18b20(&oneWire);
 
-bool lastFireState = false; // tracks last pushed state to avoid redundant alert writes
+enum CoachState { STATE_NORMAL, STATE_SMOKE_WARNING, STATE_FIRE };
+CoachState lastState = STATE_NORMAL; // tracks last pushed state to avoid redundant alert writes
 
 unsigned long long epochMillisNow() {
   time_t now;
@@ -138,34 +148,47 @@ void loop() {
       tempValue = -127.0; // sentinel for sensor error
     }
 
-    // ---- Fire Detection & Threshold Comparison ----
-    bool smokeHigh = smokeValue > SMOKE_THRESHOLD;
-    bool tempHigh  = tempValue > TEMP_THRESHOLD;
+    // ---- Fire Detection & Threshold Comparison (three-tier) ----
+    bool smokeHigh        = smokeValue > SMOKE_THRESHOLD;
+    bool smokeWarningHigh = smokeValue > SMOKE_WARNING_THRESHOLD;
+    bool tempHigh         = tempValue > TEMP_THRESHOLD;
+
     bool fireDetected = flameDetected || (smokeHigh && tempHigh);
+    CoachState state = fireDetected
+                         ? STATE_FIRE
+                         : (smokeWarningHigh ? STATE_SMOKE_WARNING : STATE_NORMAL);
 
     // ---- Decision Unit -> LCD ----
-    updateLCD(fireDetected, smokeValue, tempValue);
+    updateLCD(state, smokeValue, tempValue);
 
     // ---- Push to Firebase ----
-    pushSensorData(smokeValue, tempValue, flameDetected, fireDetected);
+    pushSensorData(smokeValue, tempValue, flameDetected, state);
 
-    if (fireDetected && !lastFireState) {
-      pushAlert(smokeValue, tempValue, flameDetected);
+    if (state != lastState && state != STATE_NORMAL) {
+      pushAlert(smokeValue, tempValue, flameDetected, state);
     }
-    lastFireState = fireDetected;
+    lastState = state;
 
+    const char* stateLabel = state == STATE_FIRE ? "FIRE DETECTED"
+                            : state == STATE_SMOKE_WARNING ? "SMOKE WARNING"
+                            : "NORMAL";
     Serial.printf("Smoke:%d Flame:%d(%d) Temp:%.2f -> %s\n",
-                  smokeValue, flameDetected, flameRaw, tempValue,
-                  fireDetected ? "FIRE DETECTED" : "NORMAL");
+                  smokeValue, flameDetected, flameRaw, tempValue, stateLabel);
   }
 }
 
-void updateLCD(bool fireDetected, int smokeValue, float tempValue) {
+void updateLCD(CoachState state, int smokeValue, float tempValue) {
   lcd.setCursor(0, 0);
-  if (fireDetected) {
-    lcd.print("!! FIRE ALERT !!");
-  } else {
-    lcd.print("Status: NORMAL  ");
+  switch (state) {
+    case STATE_FIRE:
+      lcd.print("!! FIRE ALERT !!");
+      break;
+    case STATE_SMOKE_WARNING:
+      lcd.print("SMOKE WARNING   ");
+      break;
+    default:
+      lcd.print("Status: NORMAL  ");
+      break;
   }
   lcd.setCursor(0, 1);
   char line2[17];
@@ -173,7 +196,15 @@ void updateLCD(bool fireDetected, int smokeValue, float tempValue) {
   lcd.print(line2);
 }
 
-void pushSensorData(int smokeValue, float tempValue, bool flameDetected, bool fireDetected) {
+const char* stateToString(CoachState state) {
+  switch (state) {
+    case STATE_FIRE: return "FIRE";
+    case STATE_SMOKE_WARNING: return "SMOKE_WARNING";
+    default: return "NORMAL";
+  }
+}
+
+void pushSensorData(int smokeValue, float tempValue, bool flameDetected, CoachState state) {
   if (WiFi.status() != WL_CONNECTED) return;
 
   HTTPClient http;
@@ -187,7 +218,7 @@ void pushSensorData(int smokeValue, float tempValue, bool flameDetected, bool fi
   payload += "\"timestamp\":" + String(epochMillisNow());
   payload += "},";
   payload += "\"status\":{";
-  payload += "\"state\":\"" + String(fireDetected ? "FIRE" : "NORMAL") + "\",";
+  payload += "\"state\":\"" + String(stateToString(state)) + "\",";
   payload += "\"lastUpdated\":" + String(epochMillisNow());
   payload += "}";
   payload += "}";
@@ -201,7 +232,7 @@ void pushSensorData(int smokeValue, float tempValue, bool flameDetected, bool fi
   http.end();
 }
 
-void pushAlert(int smokeValue, float tempValue, bool flameDetected) {
+void pushAlert(int smokeValue, float tempValue, bool flameDetected, CoachState state) {
   if (WiFi.status() != WL_CONNECTED) return;
 
   HTTPClient http;
@@ -209,7 +240,7 @@ void pushAlert(int smokeValue, float tempValue, bool flameDetected) {
 
   String payload = "{";
   payload += "\"coachId\":\"" + String(COACH_ID) + "\",";
-  payload += "\"type\":\"FIRE\",";
+  payload += "\"type\":\"" + String(stateToString(state)) + "\",";
   payload += "\"smoke\":" + String(smokeValue) + ",";
   payload += "\"temperature\":" + String(tempValue, 2) + ",";
   payload += "\"flame\":" + String(flameDetected ? "true" : "false") + ",";

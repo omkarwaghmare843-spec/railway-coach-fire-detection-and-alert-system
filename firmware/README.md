@@ -42,21 +42,42 @@ Firebase Console → Project Settings → Service Accounts → Database secrets.
 Each physical ESP32 unit should have a unique `COACH_ID` matching a node you create under
 `/coaches/{COACH_ID}` in the database (see `web/README.md` for the schema and seeding script).
 
-## Fire Detection Logic
+## Fire Detection Logic (three-tier)
 
 ```
-fireDetected = flameDetected OR (smokeValue > SMOKE_THRESHOLD AND tempValue > TEMP_THRESHOLD)
+fireDetected  = flameDetected OR (smokeValue > SMOKE_THRESHOLD AND tempValue > TEMP_THRESHOLD)
+smokeWarning  = smokeValue > SMOKE_WARNING_THRESHOLD   (only evaluated if fireDetected is false)
+
+state = FIRE           if fireDetected
+      = SMOKE_WARNING  else if smokeWarning
+      = NORMAL         otherwise
 ```
 
-Tune `SMOKE_THRESHOLD`, `TEMP_THRESHOLD`, and `FLAME_THRESHOLD` in the sketch based on
-your sensor's real-world calibration (MQ-2 needs ~24-48h burn-in for stable baseline readings).
+Smoke alone (without elevated temperature or flame) does **not** escalate to a full
+`FIRE` alert — it raises the separate `SMOKE_WARNING` tier instead. This avoids
+treating dust, steam, or cooking smoke as a critical fire event while still
+surfacing the condition to the dashboard rather than ignoring it outright.
+
+`SMOKE_WARNING_THRESHOLD` must stay lower than `SMOKE_THRESHOLD` so the warning
+tier triggers before the fire-combination threshold does. Tune `SMOKE_WARNING_THRESHOLD`,
+`SMOKE_THRESHOLD`, `TEMP_THRESHOLD`, and `FLAME_THRESHOLD` based on your sensor's
+real-world calibration (MQ-2 needs ~24-48h burn-in for stable baseline readings).
 
 ## Data Flow
 
 Every 2 seconds the device:
 
 1. Reads MQ-2, flame sensor, and DS18B20.
-2. Evaluates the fire decision logic.
-3. Updates the 16x2 LCD (`NORMAL` or `FIRE ALERT` + live readings).
+2. Evaluates the three-tier fire decision logic.
+3. Updates the 16x2 LCD (`NORMAL`, `SMOKE WARNING`, or `FIRE ALERT` + live readings).
 4. PATCHes `/coaches/{COACH_ID}` in Firebase RTDB with the latest sensor + status data.
-5. On a NORMAL→FIRE transition, POSTs a new record to `/alerts` for the web dashboard to display.
+5. On a transition into `SMOKE_WARNING` or `FIRE` from a different state, POSTs a new
+   record to `/alerts` (with `type` set to `SMOKE_WARNING` or `FIRE`) for the web
+   dashboard to display.
+
+## Time sync
+
+The device syncs wall-clock time via NTP after connecting to WiFi so that
+`timestamp`/`lastUpdated` values pushed to Firebase are real epoch milliseconds
+(matching `Date.now()` on the web dashboard). Until NTP sync completes, it falls
+back to device uptime (`millis()`), which is not wall-clock accurate.

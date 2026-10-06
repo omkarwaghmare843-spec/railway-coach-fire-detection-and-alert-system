@@ -15,6 +15,7 @@ function timeAgo(ts?: number) {
 export default function DashboardPage() {
   const { coaches, loading } = useCoaches();
   const fireCount = coaches.filter((c) => c.status?.state === "FIRE").length;
+  const smokeWarningCount = coaches.filter((c) => c.status?.state === "SMOKE_WARNING").length;
 
   return (
     <div className="mx-auto max-w-5xl">
@@ -22,14 +23,24 @@ export default function DashboardPage() {
         <h1 className="text-lg font-bold" style={{ color: "var(--text-primary)" }}>
           Coach Overview
         </h1>
-        {fireCount > 0 && (
-          <span
-            className="rounded-full px-3 py-1 text-sm font-semibold"
-            style={{ color: "var(--status-critical)", backgroundColor: "rgba(208,59,59,0.12)" }}
-          >
-            {fireCount} coach{fireCount > 1 ? "es" : ""} on fire alert
-          </span>
-        )}
+        <div className="flex gap-2">
+          {smokeWarningCount > 0 && (
+            <span
+              className="rounded-full px-3 py-1 text-sm font-semibold"
+              style={{ color: "var(--status-warning)", backgroundColor: "rgba(250,178,25,0.16)" }}
+            >
+              {smokeWarningCount} coach{smokeWarningCount > 1 ? "es" : ""} with smoke warning
+            </span>
+          )}
+          {fireCount > 0 && (
+            <span
+              className="rounded-full px-3 py-1 text-sm font-semibold"
+              style={{ color: "var(--status-critical)", backgroundColor: "rgba(208,59,59,0.12)" }}
+            >
+              {fireCount} coach{fireCount > 1 ? "es" : ""} on fire alert
+            </span>
+          )}
+        </div>
       </div>
 
       {loading ? (
@@ -56,7 +67,15 @@ export default function DashboardPage() {
               <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
                 <div>
                   <div style={{ color: "var(--text-muted)" }}>Smoke</div>
-                  <div className="tabular-nums font-medium" style={{ color: "var(--text-primary)" }}>
+                  <div
+                    className="tabular-nums font-medium"
+                    style={{
+                      color:
+                        coach.status?.state === "SMOKE_WARNING" || coach.status?.state === "FIRE"
+                          ? "var(--status-warning)"
+                          : "var(--text-primary)",
+                    }}
+                  >
                     {coach.sensors?.smoke ?? "—"}
                   </div>
                 </div>

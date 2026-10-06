@@ -16,7 +16,7 @@ export interface SensorReading {
   timestamp: number;
 }
 
-export type CoachState = "NORMAL" | "FIRE";
+export type CoachState = "NORMAL" | "SMOKE_WARNING" | "FIRE";
 
 export interface CoachStatus {
   state: CoachState;
@@ -39,7 +39,7 @@ export interface Coach {
 export interface FireAlert {
   id: string;
   coachId: string;
-  type: "FIRE";
+  type: "FIRE" | "SMOKE_WARNING";
   smoke: number;
   temperature: number;
   flame: boolean;
