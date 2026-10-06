@@ -54,7 +54,7 @@ const char* COACH_ID = "coach_01";
 #define I2C_SCL        22
 
 // ---------------- Thresholds ----------------
-const int   SMOKE_WARNING_THRESHOLD = 2200; // ADC 0-4095; smoke-only -> SMOKE WARNING tier
+const int   SMOKE_WARNING_THRESHOLD = 3100; // ADC 0-4095; smoke-only -> SMOKE WARNING tier
 const int   SMOKE_THRESHOLD = 3200;   // ADC 0-4095, tune to MQ-2 sensitivity/env
 const float TEMP_THRESHOLD  = 55.0;   // degrees Celsius
 const int   FLAME_THRESHOLD = 2000;   // lower ADC reading usually means flame detected
