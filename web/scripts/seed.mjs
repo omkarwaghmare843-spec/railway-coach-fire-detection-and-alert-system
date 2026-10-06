@@ -1,8 +1,11 @@
-// One-time setup script: creates the first admin account and a sample coach node.
-// Usage: node scripts/seed.mjs
+// One-time setup script: creates login accounts for each role + a sample coach node.
+// Usage: npm run seed
 //
-// Requires the same FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY
-// admin credentials as .env.local (loaded automatically via --env-file in the npm script).
+// Requires FIREBASE_PROJECT_ID / FIREBASE_CLIENT_EMAIL / FIREBASE_PRIVATE_KEY
+// admin credentials in .env.local.
+//
+// Override the default accounts/passwords via env vars before running, e.g.
+//   SEED_ADMIN_EMAIL=you@org.com SEED_ADMIN_PASSWORD=... npm run seed
 
 import { initializeApp, cert } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
@@ -21,10 +24,6 @@ if (!projectId || !clientEmail || !privateKey || !databaseURL) {
   process.exit(1);
 }
 
-const ADMIN_EMAIL = process.env.SEED_ADMIN_EMAIL || "admin@railway.local";
-const ADMIN_PASSWORD = process.env.SEED_ADMIN_PASSWORD || "ChangeMe123!";
-const ADMIN_NAME = process.env.SEED_ADMIN_NAME || "System Administrator";
-
 const app = initializeApp({
   credential: cert({ projectId, clientEmail, privateKey }),
   databaseURL,
@@ -33,28 +32,63 @@ const app = initializeApp({
 const auth = getAuth(app);
 const db = getDatabase(app);
 
-async function main() {
+function randomPassword() {
+  return `RailFire@${Math.random().toString(36).slice(2, 10)}`;
+}
+
+const ACCOUNTS = [
+  {
+    email: process.env.SEED_ADMIN_EMAIL || "admin@railway.local",
+    password: process.env.SEED_ADMIN_PASSWORD || randomPassword(),
+    name: "System Administrator",
+    role: "admin",
+    assignedCoaches: "all",
+  },
+  {
+    email: process.env.SEED_STATION_MASTER_EMAIL || "stationmaster@railway.local",
+    password: process.env.SEED_STATION_MASTER_PASSWORD || randomPassword(),
+    name: "Station Master",
+    role: "station-master",
+    assignedCoaches: ["coach_01"],
+  },
+  {
+    email: process.env.SEED_COACH_MONITOR_EMAIL || "coachmonitor@railway.local",
+    password: process.env.SEED_COACH_MONITOR_PASSWORD || randomPassword(),
+    name: "Coach Monitor",
+    role: "coach-monitor",
+    assignedCoaches: ["coach_01"],
+  },
+];
+
+async function ensureUser({ email, password, name, role, assignedCoaches }) {
   let user;
+  let created = false;
   try {
-    user = await auth.getUserByEmail(ADMIN_EMAIL);
-    console.log(`Admin user already exists: ${ADMIN_EMAIL} (${user.uid})`);
+    user = await auth.getUserByEmail(email);
+    console.log(`Already exists: ${email} (${user.uid}) — updating role record only.`);
   } catch {
-    user = await auth.createUser({
-      email: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD,
-      displayName: ADMIN_NAME,
-    });
-    console.log(`Created admin user: ${ADMIN_EMAIL} (${user.uid})`);
-    console.log(`Temporary password: ${ADMIN_PASSWORD} — change this after first login.`);
+    user = await auth.createUser({ email, password, displayName: name });
+    created = true;
+    console.log(`Created user: ${email} (${user.uid})`);
   }
 
   await db.ref(`users/${user.uid}`).set({
-    email: ADMIN_EMAIL,
-    name: ADMIN_NAME,
-    role: "admin",
-    assignedCoaches: "all",
+    email,
+    name,
+    role,
+    assignedCoaches,
     createdAt: Date.now(),
   });
+
+  return created;
+}
+
+async function main() {
+  const createdPasswords = [];
+  for (const account of ACCOUNTS) {
+    const created = await ensureUser(account);
+    if (created) createdPasswords.push(account);
+  }
 
   await db.ref("coaches/coach_01").set({
     meta: { name: "Coach A1", train: "12951 Mumbai Rajdhani", location: "Car 3" },
@@ -63,7 +97,13 @@ async function main() {
   });
   console.log("Seeded sample coach: coach_01");
 
-  console.log("Done.");
+  if (createdPasswords.length) {
+    console.log("\nNewly created accounts — save these passwords now, they are not stored anywhere:");
+    for (const { email, password, role } of createdPasswords) {
+      console.log(`  ${role.padEnd(16)} ${email}  /  ${password}`);
+    }
+  }
+  console.log("\nDone.");
   process.exit(0);
 }
 
